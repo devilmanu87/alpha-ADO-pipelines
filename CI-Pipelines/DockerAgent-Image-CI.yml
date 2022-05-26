@@ -1,0 +1,32 @@
+trigger: none
+
+resources:
+  repositories:
+  - repository: alpha-ADO-pipelines
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/alpha-ADO-pipelines
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent
+    trigger:
+    - master 
+    - main
+
+parameters: 
+- name: acr
+  displayName: ACR
+  type: string
+  default: itacr001
+  values:
+  - cpedracr
+  - itacr001
+  - agrid01d1utilityacr001
+variables:
+  acr: ${{ parameters.acr }}
+  agent_pool: Alpha-ADO-Agent
+
+name: $(date:yyyyMMdd)$(rev:.r)
+jobs:
+  - template: ../common/jobs/build-dockerAgent-job.yml

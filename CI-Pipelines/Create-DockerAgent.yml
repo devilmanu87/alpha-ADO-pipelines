@@ -1,0 +1,39 @@
+trigger: none
+
+resources:
+  repositories:
+  - repository: alpha-ADO-pipelines
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/alpha-ADO-pipelines
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent
+    trigger:
+    - master 
+    - main
+
+parameters: 
+- name: acr
+  displayName: ACR
+  type: string
+  default: itacr001
+  values:
+  - itacr001
+  - agrid01d1utilityacr001
+  - agrid06p1hubacr001
+variables:
+  - name: acr
+    value: ${{ parameters.acr }} 
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/CloudPlatformEngineering/') }}:
+    - name: subscription
+      value: crd-eng-hub
+    - name: keyVault
+      value: it-kv-001-int-eastus  
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/SaaSCloudPlatform/') }}:
+    - template: ../common/variables/CD/PROD/CI-CD-Common-vars.yml 
+
+name: $(date:yyyyMMdd)$(rev:.r)
+jobs:
+  - template: ../common/jobs/build-run-dockerAgent-job.yml

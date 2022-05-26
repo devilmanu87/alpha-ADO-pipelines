@@ -1,0 +1,204 @@
+# Variable 'tfvars_home' was defined in the Variables tab
+# Variable Group 'AGrid_Lite_TF_VARS' was defined in the Variables tab
+jobs:
+- job: Job_1
+  displayName: AGrid PROD AZServices
+  condition: eq(variables.appzone, 'primary')  
+  pool:
+    name: Agrid-PROD-ADO-Agent
+    demands:
+    - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)    
+  steps:
+  - checkout: self
+    clean: true
+  - checkout: terraform-agrid-aks-platform
+  - checkout: tf_aks_repo
+  - checkout: tf_agrid_appconfigs  
+  - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+    displayName: Install Terraform latest
+    enabled: False
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Init AZServices '
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AZServices/global
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/azservices/acr/$(tfvars_home).tfstate
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Plan AZServices'
+    inputs:
+      command: plan
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AZServices/global
+      commandOptions: -var-file=../../../../terraform-agrid-app-configs/DataSource/agrid-spokes/$(apptype)/$(appregion)/$(tfvars_home).tfvars -out=$(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/azservices/acr/$(tfvars_home).tfstate    
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Apply AZServices'
+    inputs:
+      command: apply
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AZServices/global
+      commandOptions: $(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/azservices/acr/$(tfvars_home).tfstate            
+- job: Job_2
+  displayName: AGrid PROD AKSCluster
+  dependsOn: Job_1  
+  condition: or(eq(variables.appzone, 'secondary'), succeeded('Job_1'))   
+  pool:
+    name: Agrid-PROD-ADO-Agent
+    demands:
+    - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)    
+  steps:
+  - checkout: self
+    clean: true
+  - checkout: terraform-agrid-aks-platform
+  - checkout: tf_aks_repo
+  - checkout: tf_agrid_appconfigs    
+  - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+    displayName: Install Terraform latest
+    enabled: False  
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Init AKSCluster'
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/$(tf_run_dir)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-cluster/$(tfvars_home).tfstate
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Plan AKSCluster'
+    inputs:
+      command: plan
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/$(tf_run_dir)
+      commandOptions: -var-file=../../../terraform-agrid-app-configs/DataSource/agrid-spokes/$(apptype)/$(appregion)/$(tfvars_home).tfvars -out=$(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-cluster/$(tfvars_home).tfstate
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Apply AKSCluster'
+    inputs:
+      command: apply
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/$(tf_run_dir)
+      commandOptions: $(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-cluster/$(tfvars_home).tfstate      
+- job: Job_3
+  displayName: AGrid PROD AKSCluster Nodepool
+  dependsOn: Job_2
+  condition: and(or(eq(variables.appzone, 'primary'), eq(variables.appzone, 'secondary')), succeeded('Job_2'))   
+  pool:
+    name: Agrid-PROD-ADO-Agent
+    demands:
+    - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId) 
+  steps:
+  - checkout: self
+    clean: true
+  - checkout: terraform-agrid-aks-platform
+  - checkout: tf_aks_repo
+  - checkout: tf_agrid_appconfigs    
+  - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+    displayName: Install Terraform latest
+    enabled: False  
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Init AKSCluster Nodepool'
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AKSNodepool
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-nodepool/$(tfvars_home).tfstate
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Plan AKSCluster Nodepool'
+    inputs:
+      command: plan
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AKSNodepool
+      commandOptions: -var-file=../../../terraform-agrid-app-configs/DataSource/agrid-spokes/$(apptype)/$(appregion)/$(tfvars_home).tfvars -out=$(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-nodepool/$(tfvars_home).tfstate
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Apply AKSCluster Nodepool'
+    inputs:
+      command: apply
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AKSNodepool
+      commandOptions: $(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-nodepool/$(tfvars_home).tfstate      
+- job: Job_4
+  displayName: AGrid PROD AKSCluster KubeConfig
+  dependsOn: Job_3
+  condition: and(or(eq(variables.appzone, 'primary'), eq(variables.appzone, 'secondary')), succeeded('Job_3'))   
+  pool:
+    name: Agrid-PROD-ADO-Agent
+    demands:
+    - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId) 
+  steps:
+  - checkout: self
+    clean: true
+  - checkout: terraform-agrid-aks-platform
+  - checkout: tf_aks_repo
+  - checkout: tf_agrid_appconfigs    
+  - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+    displayName: Install Terraform latest
+    enabled: False   
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Init AKSKubeConfig'
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AKSKubeConfig
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)-aks-kubeconfig/$(tfvars_home).tfstate
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Plan AKSKubeConfig'
+    inputs:
+      command: plan
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AKSKubeConfig
+      commandOptions: -var-file=../../../terraform-agrid-app-configs/DataSource/agrid-spokes/$(apptype)/$(appregion)/$(tfvars_home).tfvars -out=$(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-kubeconfig/$(tfvars_home).tfstate
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Apply AKSKubeConfig'
+    inputs:
+      command: apply
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-aks-platform/Modules/AKSKubeConfig
+      commandOptions: $(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/aks-kubeconfig/$(tfvars_home).tfstate      
+
+...

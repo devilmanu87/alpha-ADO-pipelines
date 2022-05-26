@@ -1,0 +1,72 @@
+jobs:
+  - deployment: Approval
+    displayName: Approval Required
+    environment: '$(environment)-ENV'
+    pool:
+      name: $(agent_pool)
+      demands:
+      - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: alpha-eng-utilities
+          - checkout: alpha-application-configs
+          #- task: Docker@2
+          #  inputs:
+          #    containerRegistry: '$(acr).azurecr.io'
+          #    command: 'login'
+          - task: AzureKeyVault@2
+            inputs:
+              azureSubscription: '$(subscription)'
+              KeyVaultName: '$(keyVault)'
+              SecretsFilter: 'service-principle-user,service-principle-password'
+              RunAsPreJob: true 
+          #- task: AzureCLI@2      
+          #  inputs:
+          #    azureSubscription: 'crd-eng-platform-Subscription'
+          #    scriptType: 'bash'
+          #    scriptLocation: 'inlineScript'
+          #    inlineScript: |       
+          #      az acr helm repo add -n $(acr)
+          #      az keyvault secret show --vault-name "it-kv-001-int-eastus" --name $(kube_config) --query value -o tsv | base64 --decode > kube-config    
+          - task: CmdLine@2
+            displayName: Download Helm Chart from ACR
+            env:
+              HELM_EXPERIMENTAL_OCI: 1
+            inputs:
+              script: |
+                az login --service-principal -u $(service-principle-user) -p $(service-principle-password) --tenant $(tenant)
+                az acr login -n $(acr)
+                az acr helm repo add -n $(acr)
+                az acr helm list --name $(acr)
+
+                az keyvault secret show --vault-name $(keyVault) --name $(kube_config) --query value -o tsv | base64 --decode > kube-config    
+
+                helm registry login $(acr).azurecr.io --username $(service-principle-user) --password $(service-principle-password)
+                
+                helm pull oci://$(acr).azurecr.io/helm/$(helm_repo) --version $(helm_chart_version) --debug
+                tar zxvf *.tgz
+          - task: CmdLine@2
+            displayName: 'Dry-Run'
+            inputs:
+              script: |
+                pwd 
+                echo "K8s Cluster: $(kube_config)"
+                export KUBECONFIG=$(Build.SourcesDirectory)/kube-config
+                chmod +x ./alpha-eng-utilities/scripts/$(script_name)
+                dos2unix ./alpha-eng-utilities/scripts/$(script_name)
+                ./alpha-eng-utilities/scripts/$(script_name) -r $(helm_repo) -n $(namespace) -f ./alpha-application-configs/$(platform_component)/custom_values/$(helm_chart_version)/$(kube_config).yaml -d true $(script_params)      
+          - task: CmdLine@2
+            displayName: 'Deploy ${{ parameters.platform_component }}'
+            condition: and(succeeded(), eq(variables.deployment_type, 'Dry-Run + Deploy'))
+            inputs:
+              script: |
+                pwd 
+                echo "K8s Cluster: $(kube_config)"
+                export KUBECONFIG=$(Build.SourcesDirectory)/kube-config
+                chmod +x ./alpha-eng-utilities/scripts/$(script_name)
+                dos2unix ./alpha-eng-utilities/scripts/$(script_name)
+                ./alpha-eng-utilities/scripts/$(script_name) -r $(helm_repo) -n $(namespace) -f ./alpha-application-configs/$(platform_component)/custom_values/$(helm_chart_version)/$(kube_config).yaml  $(script_params)
+
+              

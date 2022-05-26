@@ -1,0 +1,76 @@
+# Variable 'acr' was defined in the Variables tab
+# Variable 'custom_path_tag' was defined in the Variables tab
+# Variable 'helm_repo' was defined in the Variables tab.
+trigger: none
+
+parameters:
+  - name: platform_component
+    displayName: Platform Component
+    type: string
+    default: '---Select Component---'
+    values:
+    - '---Select Component---'
+    - CSIDriver
+    - Fluentd
+    - IngressController
+    - Jaeger
+    - Kafka
+    - Litmus
+    - Elastic_Kibana
+    - Prometheus
+    - OAuth2
+    - DockerAgentImage
+    - Ambassador
+    - Ambassador_Edge_Stack
+  - name: version
+    displayName: Version
+    type: string
+    values:
+    - 1.5.0 
+variables:
+  - template: ../common/variables/CI/Docker-CI-vars.yml
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/CloudPlatformEngineering/') }}:
+    - template: ../common/variables/CD/DEV/CI-CD-Common-vars.yml
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/SaaSCloudPlatform/') }}:
+    - ${{ if eq(variables['Build.DefinitionName'], 'AGrid-CUAT-Docker-CI') }}:     
+      - name: environment
+        value: CUAT
+    - ${{ if eq(variables['Build.DefinitionName'], 'AGrid-PROD-Docker-CI') }}:
+      - name: environment
+        value: PROD
+    - template: ../common/variables/CD/${{ variables.environment }}/CI-CD-Common-vars.yml
+  - name: platform_component
+    value: ${{ parameters.platform_component }}
+  - name: version
+    value: ${{ parameters.version }}
+  - name: custom_path_tag
+    value: $(${{ parameters.platform_component }}_custom_path)  
+resources:
+  repositories:
+  - repository: alpha-application-configs
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/alpha-application-configs    
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent        
+
+name: "$(Date:yyyy-MM-dd)$(Rev:.r) (${{ parameters.platform_component }} ${{ parameters.version }})"
+
+stages:
+- stage: run_docker_agent
+  displayName: Run Docker Agent
+  jobs:
+    - template: ../common/jobs/build-run-dockerAgent-job.yml
+- stage: 
+  dependsOn: run_docker_agent
+  displayName: Push Images
+  jobs:
+    - template: ../common/jobs/promote-images-to-acr-job.yml
+- stage: clean_up_job
+  condition: always()
+  displayName: Clean Up Job
+  jobs:
+    - template: ../common/jobs/clean-up-job.yml                            
+...

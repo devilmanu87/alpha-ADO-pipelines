@@ -1,0 +1,50 @@
+trigger: none
+
+parameters:
+  - name: variables_template_filename
+    type: string
+
+variables:
+  - name: acr
+    value: cpedracr
+  - template: ../common/variables/${{ parameters.variables_template_filename }}
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/CloudPlatformEngineering/') }}:
+    - name: subscription
+      value: crd-eng-hub-Subscription
+    - name: keyVault
+      value: it-kv-001-int-eastus
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/SaaSCloudPlatform/') }}:
+    - name: subscription
+      value: agrid-01-d1-hub-sub-001
+    - name: keyVault
+      value: agrid-01-d1-hub-kv-001    
+
+resources:
+  repositories:
+  - repository: alpha-eng-utilities
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/alpha-eng-utilities
+  - repository: alpha-application-configs
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/alpha-application-configs    
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent       
+      
+stages:
+- stage: run_docker_agent
+  displayName: Run Docker Agent
+  jobs:
+    - template: ../common/jobs/build-run-dockerAgent-job.yml
+- stage: Deploy
+  displayName: Deploy to K8s Cluster
+  jobs:
+    - template: ../common/jobs/kafka-deploy-job.yml 
+- stage: clean_up_job
+  condition: always()
+  displayName: Clean Up Job
+  jobs:
+    - template: ../common/jobs/clean-up-job.yml     

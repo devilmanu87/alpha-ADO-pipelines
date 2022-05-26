@@ -1,0 +1,84 @@
+jobs:
+- job: Job_1
+  displayName: Run Docker Agent
+  pool:
+    name: $(agent_pool)
+  steps:
+    - script: |
+        sudo docker ps -a | grep Exit | cut -d ' ' -f 1 | xargs sudo docker rm | true
+    - task: AzureKeyVault@2
+      inputs:
+        azureSubscription: '$(subscription)'
+        KeyVaultName: '$(keyVault)'
+        SecretsFilter: 'AZP-TOKEN'
+        RunAsPreJob: true
+    - task: Docker@1
+      displayName: 'Run Docker Agent'
+      inputs:
+        containerregistrytype: 'Container Registry'
+        dockerRegistryEndpoint: '$(acr).azurecr.io'
+        command: 'Run an image'
+        arguments: ' --privileged --network=host -p 443:443'
+        imageName: 'ado-docker-agent:latest'
+        containerName: '$(Build.DefinitionName)-$(Build.BuildId)'
+        volumes: '/var/run/docker.sock:/var/run/docker.sock'
+        envVars: |
+          AZP_URL=$(System.TeamFoundationCollectionUri)
+          AZP_TOKEN=$(AZP-TOKEN)
+          AZP_POOL=$(agent_pool)
+          AZP_AGENT_NAME=$(Build.DefinitionName)-$(Build.BuildId)
+      #  containerCommand: $(run_once)
+        restartPolicy: 'no' 
+- job: Job_1a
+  displayName: Build & Push DockerAgent image
+  dependsOn: Job_1
+  condition: failed()
+  pool:
+    name: $(agent_pool)
+  steps:
+    - checkout: ADO-Docker-agent
+    - script: |
+        sudo apt install docker.io -y
+        sudo chmod 777 /var/run/docker.sock
+      displayName: 'Install docker in VM agent'
+    - task: Docker@0
+      displayName: 'Build DockerAgent image'
+      inputs:
+        containerregistrytype: 'Container Registry'
+        dockerRegistryConnection: '$(acr).azurecr.io'
+        action: 'Build an image'
+        dockerFile: 'Dockerfile'
+        imageName: 'ado-docker-agent:$(Build.BuildId)'
+        includeLatestTag: true
+        enforceDockerNamingConvention: false
+    - task: Docker@0
+      displayName: 'Push DockerAgent image to ACR $(acr)'
+      inputs:
+        containerregistrytype: 'Container Registry'
+        dockerRegistryConnection: $(acr).azurecr.io
+        action: 'Push an image'
+        imageName: 'ado-docker-agent:$(Build.BuildId)'
+        includeLatestTag: true
+    - task: AzureKeyVault@2
+      inputs:
+        azureSubscription: '$(subscription)'
+        KeyVaultName: '$(keyVault)'
+        SecretsFilter: 'AZP-TOKEN'
+        RunAsPreJob: true
+    - task: Docker@1
+      displayName: 'Run Docker Agent'
+      inputs:
+        containerregistrytype: 'Container Registry'
+        dockerRegistryEndpoint: '$(acr).azurecr.io'
+        command: 'Run an image'
+        arguments: ' --privileged --network=host -p 443:443'
+        imageName: 'ado-docker-agent:latest'
+        containerName: '$(Build.DefinitionName)-$(Build.BuildId)'
+        volumes: '/var/run/docker.sock:/var/run/docker.sock'
+        envVars: |
+          AZP_URL=$(System.TeamFoundationCollectionUri)
+          AZP_TOKEN=$(AZP-TOKEN)
+          AZP_POOL=$(agent_pool)
+          AZP_AGENT_NAME=$(Build.DefinitionName)-$(Build.BuildId)
+      #  containerCommand: $(run_once)
+        restartPolicy: 'no'         

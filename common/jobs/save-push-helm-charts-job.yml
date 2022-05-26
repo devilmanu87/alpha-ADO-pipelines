@@ -1,0 +1,41 @@
+jobs:      
+  - job: checkout_repo
+    displayName: Save & Push Helm repo
+    pool:
+      name: $(agent_pool)
+      demands:
+      - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)
+    steps:
+    - checkout: Helm_Repo
+    - task: AzureKeyVault@2
+      inputs:
+        azureSubscription: '$(subscription)'
+        KeyVaultName: '$(keyVault)'
+        SecretsFilter: 'service-principle-user,service-principle-password'
+        RunAsPreJob: true   
+    - task: CmdLine@2
+      displayName: Save and Push Helm chart
+      inputs:
+        script: |
+          pwd
+
+          ls
+          echo "current REPO:" $(helm_repo)
+          echo "current ACR:" $(acr)
+          export HELM_EXPERIMENTAL_OCI=1
+          helm registry login $(acr).azurecr.io --username $(service-principle-user) --password $(service-principle-password)
+          
+          helm version
+                    
+          echo "------------------------------------------------------------"
+          
+          echo "Save helm chart: " $(acr).azurecr.io/helm/$(helm_repo):$(version)
+          helm package . --version $(version)
+          echo "---------------------------------------------------"
+          
+          echo "Push helm chart: " $(acr).azurecr.io/helm/$(helm_repo):$(version)
+          helm push *.tgz oci://$(acr).azurecr.io/helm	          
+
+
+          
+      

@@ -1,0 +1,86 @@
+trigger: none
+
+parameters:
+  - name: k8s_clusters
+    displayName: List of K8s Clusters
+    type: object
+    default:
+    - cpe-dr-eus2-aks-poc-001-admin
+    - cpe-dr-cus-aks-poc-001-admin
+  - name: platform_component
+    displayName: Platform Component
+    type: string
+    default: '---Select Component---'
+    values:
+    - '---Select Component---'
+    - CSIDriver
+    - Fluentd
+    - IngressController
+    - Jaeger
+    - Kafka
+    - Litmus
+    - LitmusAgent
+    - Elastic_Kibana
+    - Prometheus
+    - OAuth2  
+  - name: version
+    displayName: Version
+    default:
+    type: string
+    values:
+    - 1.5.0
+    - 1.4.0      
+  - name: deployment_type
+    displayName: Deployment Type
+    type: string
+    default: 'Dry-Run'
+    values:
+    - 'Dry-Run'
+    - 'Dry-Run + Deploy'
+
+variables:
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/CloudPlatformEngineering/') }}:
+    - template: ../../common/variables/CD/DEV/CI-CD-Common-vars.yml
+    - name: platform_component  
+      value: ${{ parameters.platform_component }}     
+    - name: deployment_type  
+      value: ${{ parameters.deployment_type }}
+    - name: helm_chart_version
+      value: ${{ parameters.version }}  
+resources:
+  repositories:
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent
+  - repository: alpha-eng-utilities
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/alpha-eng-utilities
+  - repository: alpha-application-configs
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/alpha-application-configs     
+
+name: "$(Date:yyyy-MM-dd)$(Rev:.r) (${{ parameters.platform_component }} ${{ parameters.version }} ${{ parameters.deployment_type }})"
+
+stages:
+- stage: run_docker_agent
+  displayName: Run Docker Agent
+  jobs:
+    - template: ../../common/jobs/build-run-dockerAgent-job.yml  
+
+- ${{ each k8s_environment in parameters.k8s_clusters }}:
+  - stage: Deploy_${{ replace(k8s_environment,'-','_') }}
+    displayName: Deploy to ${{ k8s_environment }}
+    variables:
+      - template: ../../common/variables/CD/DEV/${{ parameters.platform_component }}/${{ k8s_environment }}.yml
+      - name: kube_config
+        value: ${{ k8s_environment }}
+    jobs:
+      - template: ../../common/jobs/generic-CD-job.yaml
+- stage: clean_up_job
+  condition: always()
+  displayName: Clean Up Job
+  jobs:
+    - template: ../../common/jobs/clean-up-job.yml

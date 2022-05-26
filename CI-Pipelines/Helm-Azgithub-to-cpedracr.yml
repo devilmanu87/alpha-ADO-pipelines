@@ -1,0 +1,84 @@
+# Variable 'acr' was defined in the Variables tab
+# Variable 'repo_name' was defined in the Variables tab
+# Variable 'tagCount' was defined in the Variables tab
+# Variable 'username' was defined in the Variables tabl
+#name: Helm-CI
+trigger: none
+
+parameters:
+  - name: helm_repo
+    displayName: Component Helm Repo*
+    type: string
+    default: '---Select Helm Repo---'
+    values:
+      - '---Select Helm Repo---'
+      - agrid-logging-fluentd
+      - agrid-litmus-chaos
+      - alpha-aks-obs-telemetry
+      - agrid-glasspane-grafana
+      - acn-aks-confluent-platform
+      - agrid-aks-jaeger
+      - alpha-aks-obs-nginx-ingress
+      - alpha-aks-obs-oauthproxy
+      - alpha-efk-observability-stack
+      - acn-akv-aks-integrator
+      - agrid-ambassador-ingress
+      - agrid-ambassador-edge-stack-apigw
+  - name: helm_repo_branch
+    displayName: Helm Repo Branch Name*
+    type: string
+    default: master
+  - name: version
+    displayName: Helm Repo Release Version*
+    type: string
+    values:
+    - 1.5.0
+variables:
+  - name: helm_repo
+    value: ${{ parameters.helm_repo }}
+  - name: helm_repo_branch
+    value: ${{ parameters.helm_repo_branch }}    
+  - name: version
+    value: ${{ parameters.version }}
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/CloudPlatformEngineering/') }}:
+    - name: subscription
+      value: crd-eng-hub
+    - name: resourceGroup
+      value: it-rg-acr-001-int-eastus       
+    - name: keyVault
+      value: it-kv-001-int-eastus
+    - name: acr
+      value: cpedracr
+    - name: agent_pool
+      value: Alpha-ADO-Agent  
+
+resources:
+  repositories:
+  - repository: Helm_Repo
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/$(helm_repo)
+    ref: $(helm_repo_branch)         
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent    
+
+name: "$(Date:yyyy-MM-dd)$(Rev:.r) (${{ parameters.helm_repo }} ${{ parameters.helm_repo_branch }} ${{ parameters.version }})"
+
+stages:
+- stage: run_docker_agent
+  displayName: Run Docker Agent
+  jobs:
+    - template: ../common/jobs/build-run-dockerAgent-job.yml
+- stage: save_push_helm_charts
+  dependsOn: run_docker_agent
+  condition: succeeded()
+  displayName: Save and Push Helm Chart
+  jobs:
+    - template: ../common/jobs/save-push-helm-charts-job.yml  
+- stage: clean_up_job
+  condition: always()
+  displayName: Clean Up Job
+  jobs:
+    - template: ../common/jobs/clean-up-job.yml

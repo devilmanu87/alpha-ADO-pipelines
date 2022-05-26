@@ -1,0 +1,48 @@
+jobs:
+- job: Job_1
+  displayName: Upload images to ACR 
+  pool:
+    name: $(agent_pool)
+    demands:
+    - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId) 
+  steps:
+  - checkout: alpha-application-configs
+  - task: AzureKeyVault@2
+    inputs:
+      azureSubscription: '$(subscription)'
+      KeyVaultName: '$(keyVault)'
+      SecretsFilter: '$(secrets)'
+      RunAsPreJob: true   
+  - task: Bash@3
+    name: PromoteImages
+    inputs:
+      targetType: 'inline'
+      script: |
+        ls
+        echo "------"
+        echo $(custom_path_tag)
+        az login --service-principal -u $(service-principle-user) -p $(service-principle-password) --tenant $(tenant)
+        file_path="$(platform_component)/docker_images_files/$(platform_component)_$(version).txt"
+        dos2unix $file_path 2>/dev/null
+       
+        if [ $(environment) != "CUAT" ]; then
+            sp_user="$(service-principle-user)"
+            sp_password="$(service-principle-password)"
+        else
+            sp_user="$(qa-service-principle-user)"
+            sp_password="$(qa-service-principle-password)"
+        fi
+        
+        while IFS= read image
+        do
+        if [ $(environment) != "CUAT" ]; then
+           az acr import --name $(acr) --source $(custom_path_tag)/$image --image $(custom_path_tag)/$image --subscription $(subscription) --resource-group $(resourceGroup) --registry $(registry)
+           echo "---Image $(custom_path_tag)/$image pushed to $(acr) from $(source_acr)---"
+        else
+           az acr import --name $(acr) --source $(source_acr).azurecr.io/$(custom_path_tag)/$image --image $(custom_path_tag)/$image --subscription $(subscription) --resource-group $(resourceGroup) --username $sp_user --password $sp_password
+           
+           echo "---Image $image pushed to $(acr) from $(source_acr)---"
+        fi        
+        done <"$file_path"
+      workingDirectory: '$(Build.SourcesDirectory)'
+      #failOnStderr: true

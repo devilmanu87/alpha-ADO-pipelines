@@ -1,0 +1,41 @@
+jobs:
+- job: Job_1
+  displayName: Upload images to ACR 
+  pool:
+    name: $(agent_pool)
+    demands:
+    - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId) 
+  steps:
+  - checkout: alpha-application-configs
+  - checkout: alpha-eng-utilities  
+  - task: AzureKeyVault@2
+    inputs:
+      azureSubscription: '$(subscription)'
+      KeyVaultName: '$(keyVault)'
+      SecretsFilter: 'service-principle-user,service-principle-password'
+      RunAsPreJob: true   
+  - task: Docker@2
+    inputs:
+      containerRegistry: '$(acr).azurecr.io'
+      command: 'login'
+  - task: Docker@2
+    inputs:
+      containerRegistry: '$(source_acr).azurecr.io'
+      command: 'login'
+  - task: Bash@3
+    name: DownloadImages
+    inputs:
+      targetType: 'inline'
+      script: |
+        file_path="alpha-application-configs/$(platform_component)/docker_images_files/$(platform_component)_$(version).txt"
+        dos2unix $file_path 2>/dev/null
+
+        chmod a+x ./alpha-eng-utilities/pp_images/upload_images.sh
+        if [ $(custom_path_tag) ]; then
+            ./alpha-eng-utilities/pp_images/upload_images.sh -s $(source_acr) -d $(acr) -f alpha-application-configs/$(platform_component)/docker_images_files/$(platform_component)_$(version).txt -t $(custom_path_tag)
+        else
+            ./alpha-eng-utilities/pp_images/upload_images.sh -s $(source_acr) -d $(acr) -f alpha-application-configs/$(platform_component)/docker_images_files/$(platform_component)_$(version).txt
+        fi
+
+      workingDirectory: '$(Build.SourcesDirectory)'
+      failOnStderr: true

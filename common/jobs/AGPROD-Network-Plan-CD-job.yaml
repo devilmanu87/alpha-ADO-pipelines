@@ -1,0 +1,42 @@
+  # Variable 'tfvars_home' was defined in the Variables tab
+# Variable Group 'AGrid_Lite_TF_VARS' was defined in the Variables tab
+jobs:
+- job: Job_1
+  displayName: AGrid Lite Network Provisioning
+  pool:
+    name: Agrid-PROD-ADO-Agent
+    demands:
+    - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)    
+  steps:
+  - checkout: self
+    clean: true
+  - checkout: terraform-agrid-platform
+  - checkout: tf_aks_repo  
+  - checkout: tf_agrid_appconfigs  
+  - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+    displayName: Install Terraform latest
+    enabled: False
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Init Network Provisioning'
+    inputs:
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-platform/Modules/$(tf_run_dir)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName: $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/network/$(tfvars_home).tfstate
+      #commandOptions: -backend-config=$(tf_backend)
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Plan AKSNetwork'
+    inputs:
+      command: plan
+      workingDirectory: $(Build.SourcesDirectory)/terraform-agrid-platform/Modules/$(tf_run_dir)
+      commandOptions: -var-file=../../../terraform-agrid-app-configs/DataSource/agrid-spokes/$(apptype)/$(appregion)/$(tfvars_home).tfvars -out=$(tfvars_home).plan
+      environmentServiceNameAzureRM: $(target_subscription)
+      backendServiceArm: $(terraformhub_subscription)
+      backendAzureRmResourceGroupName: $(StorageAccRG)
+      backendAzureRmStorageAccountName:  $(StorageAcc)
+      backendAzureRmContainerName: terraform
+      backendAzureRmKey: $(tfstate_key)/network/$(tfvars_home).tfstate  
+
+...

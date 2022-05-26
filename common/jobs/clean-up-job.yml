@@ -1,0 +1,14 @@
+jobs:     
+  - job: cleanup_job
+    displayName: Clean Up Job
+#    dependsOn: $(dependsOn)
+    condition: always()
+    pool:
+      name: $(agent_pool)
+      demands:
+      - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)      
+    steps:
+    - task: CmdLine@2
+      inputs:
+        script: |
+            pgrep -f /azp/bin/Agent.Listener | xargs kill -9

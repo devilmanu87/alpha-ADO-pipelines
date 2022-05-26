@@ -1,0 +1,70 @@
+# Variable 'acr' was defined in the Variables tab
+# Variable 'repo_name' was defined in the Variables tab
+# Variable 'tagCount' was defined in the Variables tab
+# Variable 'username' was defined in the Variables tabl
+#name: Helm-CI
+trigger: none
+
+parameters:
+  - name: helm_repo
+    displayName: Component Helm Repo*
+    type: string
+    default: '---Select Helm Repo---'
+    values:
+      - '---Select Helm Repo---'
+      - agrid-efk-observability-stack
+      - fluentd
+      - litmus
+      - kube-prometheus-stack
+      - jaeger
+      - ingress-nginx
+      - oauth2-proxy
+      - csi-secrets-store-provider-azure
+      - ambassador
+      - edge-stack
+  - name: version
+    displayName: Version
+    default:
+    type: string
+    values:
+    - 1.5.0    
+variables:
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/CloudPlatformEngineering/') }}:
+    - template: ../common/variables/CD/DEV/CI-CD-Common-vars.yml
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/SaaSCloudPlatform/') }}:
+    - ${{ if eq(variables['Build.DefinitionName'], 'AGrid-CUAT-Helm-CI') }}:
+      - name: environment
+        value: CUAT
+    - ${{ if eq(variables['Build.DefinitionName'], 'AGrid-PROD-Helm-CI') }}:
+      - name: environment
+        value: PROD
+      
+  - template: ../common/variables/CD/${{ variables.environment }}/CI-CD-Common-vars.yml          
+  - name: helm_repo
+    value: ${{ parameters.helm_repo }}
+  - name: version
+    value: ${{ parameters.version }}
+resources:
+  repositories:
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent    
+
+name: "$(Date:yyyy-MM-dd)$(Rev:.r) (${{ parameters.helm_repo }}-${{ parameters.version }})"
+stages:
+- stage: run_docker_agent
+  displayName: Run Docker Agent
+  jobs:
+    - template: ../common/jobs/build-run-dockerAgent-job.yml
+- stage: promote_helm_chart
+  dependsOn: run_docker_agent
+  condition: succeeded()
+  displayName: Save and Push Helm Chart
+  jobs:
+    - template: ../common/jobs/promote-helm-chart-to-acr-job.yml  
+- stage: clean_up_job
+  condition: always()
+  displayName: Clean Up Job
+  jobs:
+    - template: ../common/jobs/clean-up-job.yml

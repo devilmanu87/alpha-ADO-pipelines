@@ -1,0 +1,24 @@
+
+jobs:
+- job: Job_1
+  displayName: Build & Push DockerAgent image
+  pool:
+    name: $(agent_pool)  
+  steps:
+    - checkout: ADO-Docker-agent
+    - script: |
+        sudo apt install docker.io -y
+        sudo chmod 777 /var/run/docker.sock
+      displayName: 'Install docker in VM agent'
+
+    - task: Docker@2
+      displayName: Build and Push
+      inputs:
+        command: buildAndPush
+        containerRegistry: '$(acr).azurecr.io'
+        repository: ado-docker-agent
+        Dockerfile: 'Dockerfile'
+        tags: |
+          latest
+          $(Build.BuildId)
+

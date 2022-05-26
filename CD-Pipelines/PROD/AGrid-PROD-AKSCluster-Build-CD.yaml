@@ -1,0 +1,156 @@
+trigger: none
+
+parameters:
+  #- name: tfvars_home
+  #  displayName: Deployment TFVars File
+  #  type: string
+  #  default: 'agd-06-lite-cpe10-aks-01'
+  - name: Appcode
+    displayName: Select Application Code
+    type: string
+    default: '---Select Application---'
+    values:
+    - '---Select Application---'
+    - agrid
+  - name: AppZone
+    displayName: Select AppZone
+    type: string
+    default: '---Select AppZone---'
+    values:
+    - '---Select AppZone---'
+    - primary
+    - secondary    
+  - name: AppRegion
+    displayName: Select Region
+    type: string
+    default: '---Select Region---'
+    values:
+    - '---Select Region---'
+    - eastus2
+    - centralus
+  - name: AppLocation
+    displayName: Select Application Location
+    type: string
+    default: '---Select Application Location---'
+    values:
+    - '---Select Application Location---'
+    - hub
+    - spk
+  - name: AppType
+    displayName: Select Application Type
+    type: string
+    default: '---Select AppType---'
+    values:
+    - '---Select AppType---'
+    - util
+    - crd   
+  - name: AppComponent
+    displayName: Select ComponentType
+    type: string
+    default: '---Select ComponentType---'
+    values:
+    - '---Select ComponentType---'
+    - aks
+  - name: AppInstanceCount
+    displayName: Enter AppInstance Count
+    type: string
+    default: '001'
+
+variables:
+  - name: tenant
+    value: crdops.com
+  - name: subscription
+    value: agrid-06-p1-hub-sub-001
+  - name: terraformhub_subscription
+    value: 'agrid-06-p1-hub-sub-001'
+  - name: target_subscription  
+    value: 'agrid-06-p1-hub-sub-001'
+  - name: appregion  
+    value: ${{ parameters.AppRegion}}  
+  - name: apptype  
+    value: ${{ parameters.AppType}}  
+  - name: appzone  
+    value: ${{ parameters.AppZone}}     
+  - ${{ if eq(parameters['AppRegion'], 'eastus2') }}:
+    - name: AppRegioncode
+      value: 06-p1
+    - name: keyVault
+      value: agrid-06-p1-hub-kv-001
+    - name: StorageAcc
+      value: agrid06p1hubutil01    
+    - name: StorageAccRG
+      value: agrid-06-p1-sr-hub-rg-001
+    - name: acr
+      value: agrid06p1hubacr001
+    - name: tf_backend
+      value: "../../../terraform-agrid-app-configs/DataSource/core-Hub/platform-tf-defaults/trf-backend/eastus2/backend.tfbackend"   
+  - ${{ if eq(parameters['AppRegion'], 'centralus') }}:
+    - name: AppRegioncode
+      value: 07-p1  
+    - name: keyVault
+      value: agrid-06-p1-hub-kv-001
+    - name: StorageAcc
+      value: agrid07p1hubutil01    
+    - name: StorageAccRG
+      value: agrid-07-p1-sr-hub-rg-001
+    - name: acr
+      value: agrid06p1hubacr001      
+    - name: tf_backend
+      value: "../../../terraform-agrid-app-configs/DataSource/core-Hub/platform-tf-defaults/trf-backend/centralus/backend.tfbackend"   
+  - ${{ if eq(parameters['AppComponent'], 'aks') }}:
+    - ${{ if eq(parameters['AppType'], 'util') }}:
+      - name: tf_run_dir
+        value: AKS-Utility-Cluster
+      - name: tfstate_key
+        value: agrid-prod-utility-aks-${{ parameters.AppInstanceCount}}
+    - ${{ if eq(parameters['AppType'], 'crd') }}:
+      - name: tf_run_dir
+        value: AKS-Spoke-Cluster   
+      - name: tfstate_key
+        value: agrid-prod-spoke-aks-${{ parameters.AppInstanceCount}}
+  - name: tfvars_home  
+    value: ${{ parameters.Appcode }}-${{ variables.AppRegioncode }}-${{ parameters.AppLocation }}-${{ parameters.AppType }}-${{ parameters.AppComponent }}-${{ parameters.AppInstanceCount}}
+  - ${{ if eq(variables['System.TeamFoundationCollectionUri'], 'https://dev.azure.com/SaaSCloudPlatform/') }}:
+    - template: ../../common/variables/CD/PROD/CI-CD-Common-vars.yml    
+    #- name: tfvars_home  
+    #  value: ${{ parameters.tfvars_home }}
+
+resources:
+  repositories:
+  - repository: ADO-Docker-agent
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/ADO-Docker-agent
+    ref: master 
+  - repository: tf_aks_repo
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/trf-agrid-az-aks
+    ref: release
+  - repository: tf_agrid_appconfigs
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/terraform-agrid-app-configs
+    ref: master    
+  - repository: terraform-agrid-aks-platform
+    type: githubenterprise
+    endpoint: azcrdgithub
+    name: Alpha-Grid-Platform-Engineering/terraform-agrid-aks-platform
+    ref: release  
+
+name: "$(Date:yyyy-MM-dd)$(Rev:.r) ($(tfvars_home))"
+
+stages:
+- stage: run_docker_agent
+  displayName: Run Docker Agent
+  jobs:
+    - template: ../../common/jobs/build-run-dockerAgent-job.yml
+- stage: Deploy
+  displayName: Agrid K8S Cluster Provisioning
+  jobs:
+    - template: ../../common/jobs/AGPROD-AKSCluster-Build-CD-job.yaml
+- stage: clean_up_job
+  condition: always()
+  displayName: Clean Up Job
+  jobs:
+    - template: ../../common/jobs/clean-up-job.yml

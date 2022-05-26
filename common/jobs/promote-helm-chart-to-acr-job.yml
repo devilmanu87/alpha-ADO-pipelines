@@ -1,0 +1,50 @@
+jobs:      
+  - job: checkout_repo
+    displayName: Save & Push Helm repo
+    pool:
+      name: $(agent_pool)
+      demands:
+      - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)
+    steps:
+    - task: AzureKeyVault@2
+      inputs:
+        azureSubscription: '$(subscription)'
+        KeyVaultName: '$(keyVault)'
+        SecretsFilter: '$(secrets)'
+        RunAsPreJob: true   
+    - task: CmdLine@2
+      displayName: Save and Push Helm chart
+      inputs:
+        script: |
+          pwd
+
+          ls
+          echo "current REPO:" $(helm_repo)
+          echo "current ACR:" $(acr)
+          export HELM_EXPERIMENTAL_OCI=1
+          az login --service-principal -u $(service-principle-user) -p $(service-principle-password) --tenant $(tenant)
+          
+          if [ $(tenant) == "crd.com" ]; then
+            sp_user="$(service-principle-user)"
+            sp_password="$(service-principle-password)"
+          else
+            sp_user="$(qa-service-principle-user)"
+            sp_password="$(qa-service-principle-password)"
+          fi
+
+          echo "------------------------------------------------------------"
+
+          if [ $(environment) != "CUAT" ]; then
+            az acr import --name $(acr) --source $(custom_path_tag)/$image --image $(custom_path_tag)/$image --subscription $(subscription) --resource-group $(resourceGroup) --registry $(registry)
+           
+          else
+            az acr import --name $(acr) --source helm/$(helm_repo):$(version) --image helm/$(helm_repo):$(version) --subscription $(subscription) --resource-group $(resourceGroup) --registry $(registry)
+          
+          fi       
+
+          echo "---Helm Chart helm/$(helm_repo):$(version) pushed to $(acr) from $(source_acr)---"
+          
+
+
+          
+      

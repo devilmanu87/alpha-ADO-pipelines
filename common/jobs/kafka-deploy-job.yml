@@ -1,0 +1,200 @@
+jobs:
+  - job: deploy_application
+    displayName: Deploy Confluent Kafka       
+    pool:
+      name: $(agent_pool)
+      demands:
+      - agent.name -equals $(Build.DefinitionName)-$(Build.BuildId)
+    steps:
+    - checkout: alpha-eng-utilities
+    - checkout: alpha-application-configs
+    - task: AzureKeyVault@2
+      inputs:
+        azureSubscription: '$(subscription)'
+        KeyVaultName: '$(keyVault)'
+        SecretsFilter: ''
+        RunAsPreJob: true 
+    - task: CmdLine@2
+      displayName: Download Helm Chart from ACR
+      env:
+        HELM_EXPERIMENTAL_OCI: 1
+      inputs:
+        script: |
+          az login --service-principal -u $(service-principle-user) -p $(service-principle-password) --tenant 'crd.com'
+          az acr login -n $(acr)
+          az acr helm repo add -n $(acr)
+          az acr helm list --name $(acr)
+
+          az keyvault secret show --vault-name $(keyVault) --name $(kube_config) --query value -o tsv | base64 --decode > kube-config    
+
+          helm registry login $(acr).azurecr.io --username $(service-principle-user) --password $(service-principle-password)
+          
+          helm pull oci://$(acr).azurecr.io/helm/$(helm_repo) --version $(helm_chart_version) --debug
+          tar zxvf *.tgz
+    - task: AzureCLI@2
+      displayName: Download Certificates from AzureKeyvault
+      inputs:
+        azureSubscription: '$(subscription)'
+        scriptType: 'bash'
+        workingDirectory: '$(helm_repo)'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az keyvault secret show --vault-name $(keyVault) --name $(kube_config) --query value -o tsv | base64 --decode > kube-config
+
+          kafka_set_files="$(operator_set_files) $(zookeeper_set_files) $(kafka_set_files) $(schemaregistry_set_files) $(connect_set_files) $(replicator_set_files) $(controlcenter_set_files)"
+          arr=`echo $kafka_set_files | awk 'BEGIN { FS = "--set-file" } ; {for (i=1;i<=NF;i++) printf $i}'`
+          IFS=' ' read -r -a cert_files <<< "$arr"
+          for cert in "${cert_files[@]}"
+          do
+            key=`echo "$cert" | awk -F'=' '{print $1}'`
+            value=`echo "$cert" | awk -F'=' '{print $2 }'`
+            az keyvault secret show --vault-name "it-kv-001-int-eastus" --name $value --query value -o tsv | base64 --decode > $value
+          done
+    - task: Docker@2
+      displayName: ACR Login
+      inputs:
+        containerRegistry: '$(acr).azurecr.io'
+        command: 'login'        
+    - task: CmdLine@2
+      displayName: Operator Deploy
+      inputs:
+        script: |
+          pwd
+          ls
+          cd $(helm_repo)
+          cp -rf $(Build.SourcesDirectory)/alpha-eng-utilities/cp_operator_utils/*  scripts/.
+
+          export KUBECONFIG=./kube-config
+          custom_args="$(operator_sets) $(operator_set_files)"
+
+          kubectl apply -f az-alpha-custom-storageclass.yaml
+          chmod a+x scripts/ADO-operator-util.sh
+          ./scripts/ADO-operator-util.sh -r $(prefix) -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config).yaml -a "$custom_args" -n $(namespace)
+    - task: CmdLine@2
+      displayName: Zookeeper Deploy
+      inputs:
+        script: |
+          pwd
+          ls
+          cd $(helm_repo)
+
+          export KUBECONFIG=./kube-config
+          custom_args="$(zookeeper_sets) $(zookeeper_set_files)"
+          chmod a+x scripts/ADO-operator-util.sh
+          ./scripts/ADO-operator-util.sh -r $(prefix) -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config).yaml -a "$custom_args" -n $(namespace)          
+    - task: CmdLine@2
+      displayName: Kafka Deploy
+      inputs:
+        script: |
+          pwd
+          ls
+          cd $(helm_repo)
+
+          export KUBECONFIG=./kube-config
+          custom_args="$(kafka_sets) $(kafka_set_files)"
+          chmod a+x scripts/ADO-operator-util.sh
+          ./scripts/ADO-operator-util.sh -r $(prefix) -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config).yaml -a "$custom_args" -n $(namespace)
+    - task: CmdLine@2
+      displayName: SchemaRegistry Deploy
+      inputs:
+        script: |
+          pwd
+          ls
+          cd $(helm_repo)
+          component="schemaregistry"
+          custom_args="$(schemaregistry_sets) $(schemaregistry_set_files)"
+          password=`echo ${custom_args} | awk -F"global.sasl.plain.password=" '/global.sasl.plain.password/{print $2}' | awk '{print $1}'`
+          cert=`echo ${custom_args} | awk -F"$component.tls.fullchain=" '/'$component'.tls.fullchain=/{print $2}' | awk '{print $1}'`
+          key=`echo ${custom_args} | awk -F"$component.tls.privkey=" '/'$component'.tls.privkey=/{print $2}' | awk '{print $1}'`
+          ca_cert=`echo ${custom_args} | awk -F"$component.tls.cacerts=" '/'$component'.tls.cacerts=/{print $2}' | awk '{print $1}'`
+
+          export NAMESPACE=$(namespace)
+          export URL=$(confluent_url)
+          export USER=$(AD_user)
+          export PASSWORD=$password
+          export CA_CERT=$ca_cert
+          python scripts/confluent-iam-restApi.py -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config)_RBAC.yaml -o $component -c $cert -k $key
+ 
+
+          export KUBECONFIG=./kube-config
+          chmod a+x scripts/ADO-operator-util.sh
+          ./scripts/ADO-operator-util.sh -r $(prefix) -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config).yaml -a "$custom_args" -n $(namespace)                    
+    - task: CmdLine@2
+      displayName: Connect Deploy
+      inputs:
+        script: |
+          pwd
+          ls
+          cd $(helm_repo)
+          component="connect"
+          custom_args="$(connect_sets) $(connect_set_files)"
+
+          password=`echo ${custom_args} | awk -F"global.sasl.plain.password=" '/global.sasl.plain.password/{print $2}' | awk '{print $1}'`
+          cert=`echo ${custom_args} | awk -F"$component.tls.fullchain=" '/'$component'.tls.fullchain=/{print $2}' | awk '{print $1}'`
+          key=`echo ${custom_args} | awk -F"$component.tls.privkey=" '/'$component'.tls.privkey=/{print $2}' | awk '{print $1}'`
+          ca_cert=`echo ${custom_args} | awk -F"$component.tls.cacerts=" '/'$component'.tls.cacerts=/{print $2}' | awk '{print $1}'`
+
+          export NAMESPACE=$(namespace)
+          export URL=$(confluent_url)
+          export USER=$(AD_user)
+          export PASSWORD=$password
+          export CA_CERT=$ca_cert
+          python scripts/confluent-iam-restApi.py -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config)_RBAC.yaml -o $component -c $cert -k $key
+ 
+
+          export KUBECONFIG=./kube-config
+          chmod a+x scripts/ADO-operator-util.sh
+          ./scripts/ADO-operator-util.sh -r $(prefix) -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config).yaml -a "$custom_args" -n $(namespace)                    
+    - task: CmdLine@2
+      displayName: Replicator Deploy
+      inputs:
+        script: |
+          pwd
+          ls
+          cd $(helm_repo)
+          component="replicator"
+          custom_args="$(replicator_sets) $(replicator_set_files)"
+          password=`echo ${custom_args} | awk -F"global.sasl.plain.password=" '/global.sasl.plain.password/{print $2}' | awk '{print $1}'`
+          cert=`echo ${custom_args} | awk -F"$component.tls.fullchain=" '/'$component'.tls.fullchain=/{print $2}' | awk '{print $1}'`
+          key=`echo ${custom_args} | awk -F"$component.tls.privkey=" '/'$component'.tls.privkey=/{print $2}' | awk '{print $1}'`
+          ca_cert=`echo ${custom_args} | awk -F"$component.tls.cacerts=" '/'$component'.tls.cacerts=/{print $2}' | awk '{print $1}'`
+
+          export NAMESPACE=$(namespace)
+          export URL=$(confluent_url)
+          export USER=$(AD_user)
+          export PASSWORD=$password
+          export CA_CERT=$ca_cert
+          python scripts/confluent-iam-restApi.py -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config)_RBAC.yaml -o $component -c $cert -k $key
+ 
+
+          export KUBECONFIG=./kube-config
+          chmod a+x scripts/ADO-operator-util.sh
+          ./scripts/ADO-operator-util.sh -r $(prefix) -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config).yaml -a "$custom_args" -n $(namespace)                    
+
+    - task: CmdLine@2
+      displayName: ControlCenter Deploy
+      inputs:
+        script: |
+          pwd
+          ls
+          cd $(helm_repo)
+          component="controlcenter"
+          custom_args="$(controlcenter_sets) $(controlcenter_set_files)"
+          password=`echo ${custom_args} | awk -F"global.sasl.plain.password=" '/global.sasl.plain.password/{print $2}' | awk '{print $1}'`
+          cert=`echo ${custom_args} | awk -F"$component.tls.fullchain=" '/'$component'.tls.fullchain=/{print $2}' | awk '{print $1}'`
+          key=`echo ${custom_args} | awk -F"$component.tls.privkey=" '/'$component'.tls.privkey=/{print $2}' | awk '{print $1}'`
+          ca_cert=`echo ${custom_args} | awk -F"$component.tls.cacerts=" '/'$component'.tls.cacerts=/{print $2}' | awk '{print $1}'`
+
+          export NAMESPACE=$(namespace)
+          export URL=$(confluent_url)
+          export USER=$(AD_user)
+          export PASSWORD=$password
+          export CA_CERT=$ca_cert
+          for component in controlcenter erp c3-users
+          do
+            python scripts/confluent-iam-restApi.py -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config)_RBAC.yaml -o $component -c $cert -k $key
+          done  
+ 
+          export KUBECONFIG=./kube-config
+          chmod a+x scripts/ADO-operator-util.sh
+          ./scripts/ADO-operator-util.sh -r $(prefix) -f $(Build.SourcesDirectory)/alpha-application-configs/Kafka/custom_values/1.5/$(kube_config).yaml -a "$custom_args" -n $(namespace)                    
